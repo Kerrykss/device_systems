@@ -1,0 +1,19 @@
+# Entorno virtual
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# SQLite
+device_systems.db
+
+# VS Code
+.vscode/
+
+# Variables de entorno
+.env
+
+# Pytest
+.pytest_cache/
