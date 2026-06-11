@@ -1,100 +1,139 @@
-# app/services/user_service.py
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException, status
+from typing import Optional, List
 
-from fastapi import HTTPException
-from app.data.users_db import users_db
-from app.schemas.user_schema import UserCreate, UserUpdate, UserPartialUpdate
-
-
-def get_all_users(role: str | None, is_active: bool | None) -> list[dict]:
-    result = users_db
-
-    if role is not None:
-        result = [u for u in result if u["role"] == role]
-
-    if is_active is not None:
-        result = [u for u in result if u["is_active"] == is_active]
-
-    return result
+from app.models.user_model import User
+from app.schemas.user_schema import UserCreate, UserUpdate, UserPatch
 
 
-def get_user_by_id(user_id: int) -> dict:
-    user = next((u for u in users_db if u["id"] == user_id), None)
-
-    if user is None:
+def create_user(db: Session, user_data: UserCreate) -> User:
+    """Crea un nuevo usuario en la base de datos."""
+    existing = db.query(User).filter(User.email == user_data.email).first()
+    if existing:
         raise HTTPException(
-            status_code=404,
-            detail=f"Usuario con id {user_id} no encontrado"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Ya existe un usuario con el email '{user_data.email}'"
+        )
+    new_user = User(
+        name=user_data.name,
+        email=user_data.email,
+        role=user_data.role,
+        is_active=user_data.is_active
+    )
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return new_user
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email duplicado. Ya existe un usuario con ese email."
         )
 
+
+def get_users(
+    db: Session,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    order_by: Optional[str] = None
+) -> List[User]:
+    """Lista todos los usuarios con filtros opcionales."""
+    query = db.query(User)
+
+    if role is not None:
+        query = query.filter(User.role == role)
+    if is_active is not None:
+        query = query.filter(User.is_active == is_active)
+
+    if order_by == "name":
+        query = query.order_by(User.name)
+    elif order_by == "created_at":
+        query = query.order_by(User.created_at)
+
+    return query.all()
+
+
+def get_user_by_id(db: Session, user_id: int) -> User:
+    """Busca un usuario por su ID."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Usuario con ID {user_id} no encontrado"
+        )
     return user
 
 
-def create_user(user: UserCreate) -> dict:
-    # Verificar email duplicado
-    if any(u["email"] == user.email for u in users_db):
-        raise HTTPException(
-            status_code=400,
-            detail="El correo ya está registrado"
-        )
-
-    new_id = max(u["id"] for u in users_db) + 1
-
-    new_user = {
-        "id": new_id,
-        "name": user.name,
-        "email": user.email,
-        "role": user.role,
-        "is_active": user.is_active,
-    }
-
-    users_db.append(new_user)
-    return new_user
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    """Busca un usuario por su email."""
+    return db.query(User).filter(User.email == email).first()
 
 
-def update_user(user_id: int, user: UserUpdate) -> dict:
-    existing = get_user_by_id(user_id)
+def update_user(db: Session, user_id: int, user_data: UserUpdate) -> User:
+    """Actualiza completamente un usuario (PUT)."""
+    user = get_user_by_id(db, user_id)
 
-    # Verificar email duplicado (ignorando el usuario actual)
-    if any(u["email"] == user.email and u["id"] != user_id for u in users_db):
-        raise HTTPException(
-            status_code=400,
-            detail="El correo ya está registrado por otro usuario"
-        )
-
-    existing["name"] = user.name
-    existing["email"] = user.email
-    existing["role"] = user.role
-    existing["is_active"] = user.is_active
-
-    return existing
-
-
-def partial_update_user(user_id: int, user: UserPartialUpdate) -> dict:
-    existing = get_user_by_id(user_id)
-
-    # Verificar que se envió al menos un campo
-    update_data = user.model_dump(exclude_none=True)
-
-    if not update_data:
-        raise HTTPException(
-            status_code=400,
-            detail="Debes enviar al menos un campo para actualizar"
-        )
-
-    # Verificar email duplicado si se está cambiando el email
-    if "email" in update_data:
-        if any(u["email"] == update_data["email"] and u["id"] != user_id for u in users_db):
+    # Verificar email duplicado si cambió
+    if user.email != user_data.email:
+        existing = db.query(User).filter(User.email == user_data.email).first()
+        if existing:
             raise HTTPException(
-                status_code=400,
-                detail="El correo ya está registrado por otro usuario"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ya existe un usuario con el email '{user_data.email}'"
             )
 
-    for key, value in update_data.items():
-        existing[key] = value
+    user.name = user_data.name
+    user.email = user_data.email
+    user.role = user_data.role
+    user.is_active = user_data.is_active
 
-    return existing
+    try:
+        db.commit()
+        db.refresh(user)
+        return user
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Error al actualizar: email duplicado."
+        )
 
 
-def delete_user(user_id: int) -> None:
-    user = get_user_by_id(user_id)
-    users_db.remove(user)
+def patch_user(db: Session, user_id: int, user_data: UserPatch) -> User:
+    """Actualiza parcialmente un usuario (PATCH)."""
+    user = get_user_by_id(db, user_id)
+
+    update_data = user_data.model_dump(exclude_unset=True)
+
+    # Verificar email duplicado si se está cambiando
+    if "email" in update_data and update_data["email"] != user.email:
+        existing = db.query(User).filter(User.email == update_data["email"]).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ya existe un usuario con el email '{update_data['email']}'"
+            )
+
+    for field, value in update_data.items():
+        setattr(user, field, value)
+
+    try:
+        db.commit()
+        db.refresh(user)
+        return user
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Error al actualizar: email duplicado."
+        )
+
+
+def delete_user(db: Session, user_id: int) -> None:
+    """Elimina un usuario por su ID."""
+    user = get_user_by_id(db, user_id)
+    db.delete(user)
+    db.commit()
