@@ -1,6 +1,7 @@
-#app/models/user_model.py
+# app/models/user_model.py
 
 from sqlalchemy import Integer, String, Boolean, DateTime, Column
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database.connection import Base
 
@@ -14,4 +15,6 @@ class User(Base):
     role = Column(String(50), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    
+
+    # Relación: un usuario puede tener muchos préstamos
+    loans = relationship("Loan", back_populates="user")

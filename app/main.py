@@ -13,17 +13,18 @@ from app.database.connection import engine, Base
 
 # Importar modelos para que SQLAlchemy los registre
 from app.models.user_model import User
+from app.models.device_model import Device  # LÍNEA AGREGADA
+from app.models.loan_model import Loan      # LÍNEA AGREGADA
 
 # Rutas de la API
 from app.routes.user_routes import router as user_router
+from app.routes.device_routes import router as device_router  # LÍNEA AGREGADA
+from app.routes.loan_routes import router as loan_router      # LÍNEA AGREGADA
 
 
 # =========================
 # CREACIÓN DE TABLAS
 # =========================
-# SQLAlchemy crea automáticamente todas las tablas
-# registradas en los modelos que heredan de Base.
-# Si la base de datos no existe, SQLite la crea.
 Base.metadata.create_all(bind=engine)
 
 
@@ -34,11 +35,10 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title="Device Systems API",
     description=(
-        "API REST para la gestión de usuarios del sistema Device Systems. "
-        "Permite crear, consultar, actualizar y eliminar usuarios "
-        "utilizando persistencia de datos con SQLAlchemy y SQLite."
+        "API REST para la gestión de usuarios, dispositivos y préstamos "
+        "del sistema Device Systems. Utiliza SQLAlchemy, Alembic y SQLite."
     ),
-    version="2.0.0",
+    version="3.0.0",  # ACTUALIZADO
     contact={
         "name": "Device Systems"
     },
@@ -57,11 +57,6 @@ async def sqlalchemy_exception_handler(
     request: Request,
     exc: SQLAlchemyError
 ):
-    """
-    Captura cualquier excepción relacionada con SQLAlchemy
-    y devuelve una respuesta controlada al cliente.
-    """
-
     return JSONResponse(
         status_code=500,
         content={
@@ -77,9 +72,9 @@ async def sqlalchemy_exception_handler(
 # REGISTRO DE RUTAS
 # =========================
 
-# Todas las rutas definidas en user_routes.py
-# serán agregadas a la aplicación principal.
 app.include_router(user_router)
+app.include_router(device_router)  # LÍNEA AGREGADA
+app.include_router(loan_router)    # LÍNEA AGREGADA
 
 
 # =========================
@@ -92,13 +87,8 @@ app.include_router(user_router)
     summary="Bienvenida al sistema"
 )
 def root():
-    """
-    Endpoint principal de verificación.
-    Permite comprobar que la API está funcionando correctamente.
-    """
-
     return {
-        "message": "Bienvenido a Device Systems API v2.0",
+        "message": "Bienvenido a Device Systems API v3.0",
         "docs": "/docs",
         "redoc": "/redoc"
     }
