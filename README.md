@@ -1,1042 +1,129 @@
-# Device Systems API v3.0
+# Device Systems API
 
-## 📋 Descripción
-
-API REST profesional para gestión de usuarios, dispositivos y préstamos utilizando **FastAPI**, **SQLAlchemy**, y **Alembic**. Este proyecto implementa arquitectura MVC, migraciones de base de datos y consultas avanzadas con JOINs.
+API REST segura para gestión de usuarios, dispositivos y préstamos, construida con **FastAPI**, **SQLAlchemy** y **Alembic**, con autenticación basada en **JWT (Bearer)**, control de roles, rate limiting y middleware personalizado.
 
 ---
 
-## 🔄 Cambios Respecto a Versión Anterior
+## 📁 Estructura del proyecto
 
-La versión anterior solo incluía gestión de usuarios. En v3.0 hemos implementado:
+El proyecto está organizado en capas: rutas, servicios, modelos, schemas, dependencias y middlewares, siguiendo una separación clara de responsabilidades típica de una API FastAPI escalable.
 
-- ✅ **Modelo Device** - Gestión completa de dispositivos (laptops, tablets, proyectores, etc.)
-- ✅ **Modelo Loan** - Sistema de préstamos con seguimiento de devoluciones
-- ✅ **Alembic Configurado** - Versionamiento profesional de migraciones de BD
-- ✅ **Relaciones One-to-Many** - User ↔ Loan y Device ↔ Loan
-- ✅ **CRUD Completo** - Operaciones Create, Read, Update, Delete en todas las entidades
-- ✅ **Consultas con JOINs** - Optimización de queries y evitar problema N+1
-- ✅ **Filtros Avanzados** - Búsquedas complejas y ordenamiento
-- ✅ **Manejo Robusto de Errores** - Status codes apropiados y mensajes claros
+![Estructura del proyecto](./pictures_final_V2/Estructura_proyecto_device_systems.png)
 
 ---
 
-## 🔧 Configuración de Alembic
+## 🗄️ Migraciones con Alembic
 
-### Inicializar Alembic
+Las migraciones de base de datos se gestionan con Alembic. Se crearon migraciones incrementales para las tablas `Device` y `Loan`, incluyendo sus relaciones con `User`, sobre la rama `device_systems_alembic_relaciones`.
 
-Se ejecutó el comando para crear la estructura de migraciones:
+![Migración Alembic aplicada](./pictures_final_V2/migracion_alembic.png)
 
-```bash
-alembic init alembic
-```
+---
 
-**Captura de ejecución:**
+## 🔐 Autenticación y autorización
 
-![Alembic Init](./pictures_final_V1/Alembic_pictures/ejecucion_alembic_init.png)
+### Registro de usuario
 
-### Configuración de env.py
+Se valida que el email sea único y que la contraseña cumpla reglas de seguridad (mínimo 8 caracteres, al menos una mayúscula, una minúscula, un número, y sin espacios).
 
-El archivo `alembic/env.py` se configuró para usar SQLAlchemy automáticamente:
+![Registro de usuario](./pictures_final_V2/Auth_POST_registrar_ususario.png)
+
+### Login y generación de token
+
+Al autenticarse correctamente, el sistema genera un JWT firmado que incluye el `id`, `email` y `role` del usuario como claims, evitando consultas repetidas a la base de datos en cada request protegido.
+
+![Login y token generado](./pictures_final_V2/Auth_POST_login_token.png)
+
+### Obtener usuario autenticado (`/auth/me`)
+
+Con un token válido, el endpoint `/auth/me` decodifica el JWT y retorna los datos del usuario autenticado.
+
+![Respuesta de /auth/me](./pictures_final_V2/Auth_GET_obtener_info_token_admin.png)
+
+### Acceso sin token
+
+Cualquier endpoint protegido rechaza las peticiones que no incluyan un token Bearer válido, devolviendo `401 Unauthorized`.
+
+![Acceso sin token](./pictures_final_V2/Auth_GET_sin_token_401.png)
+
+### Acceso con rol no permitido
+
+Los endpoints administrativos (como la creación de usuarios) están protegidos con una dependencia `require_admin`. Un usuario autenticado pero sin el rol adecuado recibe `403 Forbidden`.
+
+![Acceso con rol no permitido](./pictures_final_V2/Users_POST_rol_no_permitido_403.png)
+
+---
+
+## 📑 Documentación interactiva (Swagger / OpenAPI)
+
+FastAPI expone automáticamente la documentación OpenAPI en `/docs`, incluyendo el esquema de seguridad **HTTPBearer**, que permite autorizar las peticiones directamente desde la interfaz con el botón "Authorize".
+
+![Swagger con esquema de autenticación Bearer](./pictures_final_V2/Swagger_OpenAPI_HTTPBearer_auth.png)
+
+---
+
+## 🧩 Middleware personalizado
+
+Cada respuesta de la API incluye cabeceras personalizadas inyectadas por un middleware propio (`RequestMiddleware`), útiles para trazabilidad y monitoreo:
+
+- `x-app-name`: nombre de la aplicación.
+- `x-process-time`: tiempo de procesamiento de la petición.
+- `x-request-id`: identificador único de la petición, útil para rastrear errores en los logs del servidor.
+
+![Cabeceras del middleware](./pictures_final_V2/Middleware_response_headers.png)
+
+---
+
+## 🚦 Rate limiting
+
+Se implementó limitación de peticiones con `slowapi` para proteger los endpoints de autenticación contra abuso (por ejemplo, ataques de fuerza bruta sobre el login):
+
+- `POST /auth/register`: máximo 3 peticiones por minuto.
+- `POST /auth/login`: máximo 5 peticiones por minuto.
+
+Al superar el límite, la API responde con `429 Too Many Requests`.
+
+![Prueba de rate limiting](./pictures_final_V2/Auth_POST_login_rate_limiting_429.png)
+
+---
+
+## 🌐 CORS configurado
+
+El proyecto utiliza `CORSMiddleware` de FastAPI para controlar qué orígenes externos pueden consumir la API desde un navegador:
 
 ```python
-from app.database.connection import Base
-from app.models.user_model import User
-from app.models.device_model import Device
-from app.models.loan_model import Loan
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,http://localhost:8000").split(",")
 
-target_metadata = Base.metadata
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 ```
 
-Esto permite que Alembic detecte automáticamente los cambios en los modelos.
+**Explicación de la configuración:**
+
+- **`allow_origins`**: la lista de orígenes permitidos se obtiene de la variable de entorno `CORS_ORIGINS`, con un valor por defecto orientado a desarrollo local (`localhost:5173` para Vite, `localhost:3000` para React/Next, y `localhost:8000` para pruebas directas contra el propio backend). Esto permite cambiar los orígenes permitidos sin modificar el código al pasar a otro entorno (por ejemplo, producción).
+- **`allow_credentials=True`**: permite que el navegador envíe credenciales (cookies, headers de autorización como el JWT) en las peticiones cross-origin. Es necesario porque el flujo de autenticación de esta API depende del header `Authorization: Bearer <token>`.
+- **`allow_methods=["*"]`**: permite todos los métodos HTTP (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`), ya que la API expone operaciones CRUD completas sobre usuarios, dispositivos y préstamos.
+- **`allow_headers=["*"]`**: permite cualquier header en las peticiones entrantes, dando flexibilidad al frontend para enviar headers personalizados además del `Authorization`.
+
+Esta configuración es adecuada para desarrollo, donde se necesita flexibilidad entre distintos puertos locales. En un entorno de producción real, lo recomendable sería restringir `allow_origins` únicamente al dominio real del frontend, y acotar `allow_methods` y `allow_headers` a los estrictamente necesarios, reduciendo la superficie de ataque.
 
 ---
 
-## 📊 Migraciones Generadas
+## 🪞 Reflexión final sobre la importancia de la seguridad en APIs REST
 
-### Primera Migración - Modelos y Relaciones
+Construir esta API dejó en evidencia que la seguridad de un backend no se reduce a "agregar un login" — es un conjunto de capas que deben trabajar de forma coherente entre sí. Un solo detalle mal definido, como declarar el campo `sub` de un JWT como `int` en lugar de `str`, fue suficiente para romper por completo el flujo de autenticación, a pesar de que cada pieza individual (login, firma del token, decodificación) parecía estar bien implementada por separado. Esto demuestra que la seguridad de una API depende tanto del cumplimiento de estándares externos (como el RFC 7519 para JWT) como del comportamiento interno de las herramientas que se usan (como la coerción de tipos de Pydantic), y que ambos deben entenderse en conjunto, no de forma aislada.
 
-Se ejecutó el comando de autogeneración:
+Más allá del bug puntual, el proyecto reforzó varios principios fundamentales:
 
-```bash
-alembic revision --autogenerate -m "Initial migration with User Device Loan models and relationships"
-```
+- **La autenticación no es lo mismo que la autorización.** Verificar que un usuario es quien dice ser (JWT válido) es solo el primer paso; decidir qué puede hacer ese usuario (control de roles con `admin`, `support`, `user`) es una capa adicional e igualmente necesaria. Un endpoint protegido solo por autenticación, sin verificación de rol, expondría operaciones sensibles a cualquier usuario autenticado, sin importar su nivel de privilegio.
+- **Los errores de seguridad no deben revelar información interna.** Atrapar la excepción técnica de `python-jose` y traducirla a un mensaje genérico ("Invalid or expired token") evita filtrar detalles internos de implementación a un posible atacante, aunque a costa de dificultar el debugging — por eso la importancia de tener logs detallados en el servidor, separados de lo que ve el cliente final.
+- **Limitar la tasa de peticiones (rate limiting) es una defensa básica pero crítica**, especialmente en endpoints de autenticación, donde un atacante podría intentar adivinar credenciales por fuerza bruta si no existiera ningún límite.
+- **CORS no es solo una configuración molesta que "hay que desactivar para que funcione"**, sino un mecanismo de seguridad del propio navegador que decide qué orígenes externos pueden interactuar con la API; configurarlo de forma demasiado permisiva (por ejemplo, con `allow_origins=["*"]` junto con `allow_credentials=True`) puede abrir la puerta a ataques de robo de sesión desde sitios maliciosos.
+- **La trazabilidad importa.** Tener un middleware que asigna un `x-request-id` único a cada petición permite correlacionar errores reportados por un usuario con los logs exactos del servidor, lo cual es indispensable para diagnosticar problemas de seguridad o de cualquier otro tipo en producción.
 
-**Captura de creación de migración:**
-
-![Revision Autogenerate](./pictures_final_V1/Alembic_pictures/alembic_revision_autogenerate.png)
-
-Se generó automáticamente el archivo `alembic/versions/6f8780b86cdd_create_devices_and_loans_tables.py` con:
-
-- ✅ Tabla `devices` con todos los campos y constraints
-- ✅ Tabla `loans` con Foreign Keys a users e devices
-- ✅ Índices (unique en serial_number)
-- ✅ Funciones upgrade() y downgrade() para migración y rollback
-
-### Aplicación de Migraciones
-
-Se aplicaron los cambios a la base de datos:
-
-```bash
-alembic upgrade head
-```
-
-**Captura de aplicación:**
-
-![Upgrade Head](./pictures_final_V1/Alembic_pictures/alembic_upgrade_head.png)
-
-La migración se aplicó correctamente y las tablas fueron creadas en SQLite.
-
----
-
-## 🗂️ Estructura de Tablas Generadas
-
-**Captura de estructura completa:**
-
-![Estructura BD](./pictures_final_V1/Alembic_pictures/alembic_history.png)
-
-### Tabla: users
-
-```sql
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    role VARCHAR(50) NOT NULL,           -- admin, support, user
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**Constraints:**
-- `id`: Primary Key (auto-increment)
-- `email`: UNIQUE (no duplicados)
-- `is_active`: DEFAULT TRUE
-
----
-
-### Tabla: devices
-
-```sql
-CREATE TABLE devices (
-    id INTEGER PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    serial_number VARCHAR(100) UNIQUE NOT NULL,
-    device_type VARCHAR(50) NOT NULL,   -- laptop, tablet, proyector
-    brand VARCHAR(100),
-    is_available BOOLEAN DEFAULT TRUE,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**Constraints:**
-- `id`: Primary Key (auto-increment)
-- `serial_number`: UNIQUE (identificación del dispositivo)
-- `is_available`: DEFAULT TRUE
-
----
-
-### Tabla: loans
-
-```sql
-CREATE TABLE loans (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL FOREIGN KEY REFERENCES users(id),
-    device_id INTEGER NOT NULL FOREIGN KEY REFERENCES devices(id),
-    loan_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    return_date DATETIME NULL,
-    status VARCHAR(20) DEFAULT 'active'  -- active, returned, overdue
-);
-```
-
-**Constraints:**
-- `id`: Primary Key (auto-increment)
-- `user_id`: Foreign Key → users.id
-- `device_id`: Foreign Key → devices.id
-- Integridad referencial garantizada
-
----
-
-## 🔗 Relaciones Entre Modelos
-
-### User ↔ Loan (One-to-Many)
-
-**En el modelo User:**
-```python
-class User(Base):
-    loans = relationship("Loan", back_populates="user")
-```
-
-**En el modelo Loan:**
-```python
-class Loan(Base):
-    user = relationship("User", back_populates="loans")
-```
-
-**Ventaja:** Un usuario puede tener múltiples préstamos. Acceso fácil: `user.loans`
-
----
-
-### Device ↔ Loan (One-to-Many)
-
-**En el modelo Device:**
-```python
-class Device(Base):
-    loans = relationship("Loan", back_populates="device")
-```
-
-**En el modelo Loan:**
-```python
-class Loan(Base):
-    device = relationship("Device", back_populates="loans")
-```
-
-**Ventaja:** Un dispositivo puede aparecer en múltiples préstamos. Acceso fácil: `device.loans`
-
----
-
-## 🌐 Swagger UI - Documentación Interactiva
-
-### Interfaz General
-
-**Captura de Swagger UI:**
-
-![Swagger UI General](./pictures_final_V1/swagger_pictures/swagger_docs.png)
-
-La documentación automática de FastAPI es accesible en `/docs` y muestra todos los endpoints organizados por categoría.
-
----
-
-## 🧪 Pruebas de Endpoints
-
-### 1. Crear Usuario (POST /users/)
-
-**Captura:**
-
-![POST Usuario](./pictures_final_V1/users_pictures/POST_crear_usuario.png)
-
-**Request:**
-```json
-{
-  "name": "Carlos López",
-  "email": "carlos.lopez@example.com",
-  "role": "admin",
-  "is_active": true
-}
-```
-
-**Response (201 Created):**
-```json
-{
-  "id": 1,
-  "name": "Carlos López",
-  "email": "carlos.lopez@example.com",
-  "role": "admin",
-  "is_active": true,
-  "created_at": "2026-01-15T10:30:00"
-}
-```
-
----
-
-### 2. Listar Usuarios (GET /users/)
-
-**Captura:**
-
-![GET Listar Usuarios](./pictures_final_V1/users_pictures/GET_listar_usuarios.png)
-
-**Response:**
-```json
-[
-  {
-    "id": 1,
-    "name": "Carlos López",
-    "email": "carlos.lopez@example.com",
-    "role": "admin",
-    "is_active": true,
-    "created_at": "2026-01-15T10:30:00"
-  }
-]
-```
-
-Con parámetros opcionales:
-- `?role=admin` - Filtrar por rol
-- `?is_active=true` - Filtrar por estado
-- `?order_by=name` - Ordenar resultados
-
----
-
-### 3. Obtener Usuario por ID (GET /users/{user_id})
-
-**Captura:**
-
-![GET Usuario por ID](./pictures_final_V1/users_pictures/GET_usuario_por_ID.png)
-
-**Response:**
-```json
-{
-  "id": 1,
-  "name": "Carlos López",
-  "email": "carlos.lopez@example.com",
-  "role": "admin",
-  "is_active": true,
-  "created_at": "2026-01-15T10:30:00"
-}
-```
-
----
-
-### 4. Actualizar Usuario Completo (PUT /users/{user_id})
-
-**Captura:**
-
-![PUT Actualizar Usuario](./pictures_final_V1/users_pictures/PUT_actualizar_usuario_completo.png)
-
-**Request:**
-```json
-{
-  "name": "Carlos López Actualizado",
-  "email": "carlos.nuevo@example.com",
-  "role": "support",
-  "is_active": true
-}
-```
-
----
-
-### 5. Actualizar Usuario Parcialmente (PATCH /users/{user_id})
-
-**Captura:**
-
-![PATCH Actualizar Parcialmente](./pictures_final_V1/users_pictures/PATCH_actualizar_parcialmente.png)
-
-**Request:** (Solo actualizar lo que se envíe)
-```json
-{
-  "name": "Carlos Actualizado"
-}
-```
-
-Nota: PUT reemplaza todos los campos, PATCH solo actualiza los enviados.
-
----
-
-### 6. Crear Dispositivo (POST /devices/)
-
-**Captura:**
-
-![POST Dispositivo](./pictures_final_V1/Devices_pictures/POST_crear_dispositivo.png)
-
-**Request:**
-```json
-{
-  "name": "Laptop Dell XPS 15",
-  "serial_number": "DELL-XPS-2024-001",
-  "device_type": "laptop",
-  "brand": "Dell",
-  "is_available": true
-}
-```
-
-**Response (201):**
-```json
-{
-  "id": 1,
-  "name": "Laptop Dell XPS 15",
-  "serial_number": "DELL-XPS-2024-001",
-  "device_type": "laptop",
-  "brand": "Dell",
-  "is_available": true,
-  "created_at": "2026-01-15T10:31:00"
-}
-```
-
----
-
-### 7. Listar Dispositivos (GET /devices/)
-
-**Captura:**
-
-![GET Listar Dispositivos](./pictures_final_V1/Devices_pictures/GET_listar_dispositivos.png)
-
-Con filtros avanzados:
-- `?device_type=laptop` - Filtrar por tipo
-- `?is_available=true` - Solo disponibles
-- `?brand=Dell` - Filtrar por marca
-- `?search=XPS` - Búsqueda en nombre/serial
-
----
-
-### 8. Crear Préstamo (POST /loans/)
-
-**Captura:**
-
-![POST Préstamo](./pictures_final_V1/Loans_Pictures/POST_crear_prestamo.png)
-
-**Request:**
-```json
-{
-  "user_id": 1,
-  "device_id": 1
-}
-```
-
-**Response (201):**
-```json
-{
-  "id": 1,
-  "user_id": 1,
-  "device_id": 1,
-  "loan_date": "2026-01-15T10:32:00",
-  "return_date": null,
-  "status": "active"
-}
-```
-
----
-
-## 🔍 Consultas con JOINs
-
-### GET /loans/details - Préstamos con Detalles Completos
-
-**Captura:**
-
-![GET Loans Details](./pictures_final_V1/Loans_Pictures/GET_loans_details.png)
-
-**Response:**
-```json
-[
-  {
-    "loan_id": 1,
-    "status": "active",
-    "loan_date": "2026-01-15T10:32:00",
-    "return_date": null,
-    "user": {
-      "id": 1,
-      "name": "Carlos López",
-      "email": "carlos.lopez@example.com"
-    },
-    "device": {
-      "id": 1,
-      "name": "Laptop Dell XPS 15",
-      "serial_number": "DELL-XPS-2024-001",
-      "device_type": "laptop"
-    }
-  }
-]
-```
-
-**¿Por qué JOINs?**
-
-Sin JOINs:
-- Query 1: Traer préstamo
-- Query 2: Traer usuario del préstamo
-- Query 3: Traer dispositivo del préstamo
-- **Total: 3 queries por préstamo** ❌ Ineficiente (problema N+1)
-
-Con JOINs:
-- Query 1: Una sola query trae todo
-- **Total: 1 query** ✅ Eficiente
-
-**Implementación en código:**
-```python
-loans = db.query(Loan).options(
-    joinedload(Loan.user),
-    joinedload(Loan.device)
-).all()
-```
-
----
-
-## 🔎 Filtros Avanzados
-
-### Filtros en GET /loans/
-
-**Captura:**
-
-![GET Loans Filtrados](./pictures_final_V1/Loans_Pictures/GET_listar_prestamos_filtrados.png)
-
-**Ejemplos de uso:**
-
-```bash
-# Solo préstamos activos
-GET /loans/?status=active
-
-# Préstamos de un usuario específico
-GET /loans/?user_email=carlos.lopez@example.com
-
-# Préstamos de dispositivos tipo laptop
-GET /loans/?device_type=laptop
-
-# Combinados
-GET /loans/?status=active&device_type=laptop&user_email=carlos.lopez@example.com
-```
-
----
-
-### Filtros en GET /devices/
-
-**Captura:**
-
-![GET Devices Filtrados](./pictures_final_V1/Devices_pictures/GET_obtener_por_ID.png)
-
-```bash
-# Solo laptops disponibles
-GET /devices/?device_type=laptop&is_available=true
-
-# Dispositivos de marca Dell
-GET /devices/?brand=Dell
-
-# Búsqueda en nombre o serial
-GET /devices/?search=XPS
-
-# Ordenar
-GET /devices/?order_by=created_at
-```
-
----
-
-### Filtros en GET /users/
-
-```bash
-# Solo administradores
-GET /users/?role=admin
-
-# Solo usuarios activos
-GET /users/?is_active=true&role=support
-
-# Ordenar por nombre
-GET /users/?order_by=name
-```
-
----
-
-## 📦 Devolución de Dispositivo
-
-### PATCH /loans/{loan_id}/return
-
-**Captura:**
-
-![PATCH Devolver Dispositivo](./pictures_final_V1/Loans_Pictures/PATCH_devolver_dispositivo.png)
-
-**Request:** (Sin body)
-**Response:**
-```json
-{
-  "id": 1,
-  "user_id": 1,
-  "device_id": 1,
-  "loan_date": "2026-01-15T10:32:00",
-  "return_date": "2026-01-15T14:15:00",
-  "status": "returned"
-}
-```
-
-**Lógica implementada:**
-1. Busca el préstamo por ID
-2. Valida que exista
-3. Marca `return_date` con fecha actual
-4. Cambia status a "returned"
-5. Libera el dispositivo (es_available = true)
-6. Retorna el préstamo actualizado
-
----
-
-## 📱 Root Endpoint
-
-### GET /
-
-**Captura:**
-
-![GET Root](./pictures_final_V1/Root_pictures/Bienvenida_al_sistema.png)
-
-**Response:**
-```json
-{
-  "message": "Bienvenido a Device Systems API v3.0",
-  "docs": "/docs",
-  "redoc": "/redoc"
-}
-```
-
----
-
-## 🛠️ Manejo de Errores
-
-La API implementa manejo robusto de errores:
-
-```python
-@app.exception_handler(SQLAlchemyError)
-async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Error interno de base de datos"}
-    )
-```
-
-**Status codes implementados:**
-
-| Status | Significado | Ejemplo |
-|--------|-------------|---------|
-| 200 | OK | GET exitoso |
-| 201 | Created | POST exitoso |
-| 204 | No Content | DELETE exitoso |
-| 400 | Bad Request | Email duplicado, datos inválidos |
-| 404 | Not Found | Usuario/Dispositivo no existe |
-| 422 | Validation Error | Fallo validación Pydantic |
-| 500 | Server Error | Error en BD |
-
----
-
-## 🏗️ Estructura del Proyecto
-
-device_systems/
-
-├── alembic/
-
-│   ├── versions/
-
-│   │   └── 6f8780b86cdd_create_devices_and_loans_tables.py
-
-│   ├── script.py.mako
-
-│   ├── env.py
-
-│   └── alembic.ini
-
-│
-
-├── app/
-
-│   ├── database/
-
-│   │   ├── init.py
-
-│   │   └── connection.py
-
-│   │
-
-│   ├── models/
-
-│   │   ├── init.py
-
-│   │   ├── user_model.py
-
-│   │   ├── device_model.py
-
-│   │   └── loan_model.py
-
-│   │
-
-│   ├── schemas/
-
-│   │   ├── init.py
-
-│   │   ├── user_schema.py
-
-│   │   ├── device_schema.py
-
-│   │   └── loan_schema.py
-
-│   │
-
-│   ├── routes/
-
-│   │   ├── init.py
-
-│   │   ├── user_routes.py
-
-│   │   ├── device_routes.py
-
-│   │   └── loan_routes.py
-
-│   │
-
-│   ├── services/
-
-│   │   ├── init.py
-
-│   │   ├── user_service.py
-
-│   │   ├── device_service.py
-
-│   │   └── loan_service.py
-
-│   │
-
-│   └── main.py
-
-│
-
-├── pictures_final_V1/
-
-│   ├── Alembic_pictures/
-
-│   ├── Devices_pictures/
-
-│   ├── Loans_Pictures/
-
-│   ├── Root_pictures/
-
-│   ├── swagger_pictures/
-
-│   └── users_pictures/
-
-│
-
-├── device_systems.db
-
-├── requirements.txt
-
-└── README.md
-
----
-
-## 🚀 Instalación y Ejecución
-
-### 1. Clonar el repositorio
-
-```bash
-git clone https://github.com/Kerrykss/device_systems.git
-cd device_systems
-```
-
-### 2. Crear entorno virtual
-
-```bash
-python -m venv venv
-source venv/bin/activate  # En Windows: venv\Scripts\activate
-```
-
-### 3. Instalar dependencias
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Aplicar migraciones
-
-```bash
-alembic upgrade head
-```
-
-### 5. Ejecutar servidor
-
-```bash
-uvicorn app.main:app --reload
-```
-
-### 6. Acceder a la documentación
-
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
-
----
-
-## 📦 Dependencias
-
-fastapi==0.115.0
-
-uvicorn==0.30.6
-
-sqlalchemy==2.0.35
-
-pydantic==2.9.2
-
-pydantic[email]==2.9.2
-
-email-validator==2.2.0
-
-alembic==1.13.3
----
-
-## 💡 Reflexión: Importancia de Migraciones, Relaciones y Consultas Avanzadas
-
-### 🔄 Migraciones (Alembic) - Por Qué Son Críticas
-
-**Problema sin migraciones:**
-- Cambios manuales en tablas = riesgo de inconsistencia
-- No hay historial de cambios
-- Imposible hacer rollback si algo sale mal
-- En producción, cambiar estructura es arriesgado
-
-**Solución con Alembic:**
-- ✅ Versionamiento del schema (como Git para BD)
-- ✅ Cada cambio está documentado
-- ✅ Rollback automático si algo falla
-- ✅ Reproducible en cualquier máquina
-- ✅ Seguro para producción
-
-**Ejemplo real:**
-```bash
-# Versión 1: Solo usuarios
-alembic upgrade 001
-
-# Versión 2: Agregamos devices
-alembic upgrade 002
-
-# Algo salió mal, rollback:
-alembic downgrade 001
-
-# De nuevo a v2 cuando está listo:
-alembic upgrade 002
-```
-
-Sin Alembic, esto requeriría scripts SQL manuales y es propenso a errores.
-
----
-
-### 🔗 Relaciones (SQLAlchemy ORM) - Por Qué Importan
-
-**Problema sin relaciones:**
-```python
-# Código tedioso y propenso a errores
-user = db.query(User).filter(User.id == 1).first()
-loans = db.query(Loan).filter(Loan.user_id == user.id).all()
-for loan in loans:
-    device = db.query(Device).filter(Device.id == loan.device_id).first()
-    print(f"{user.name} prestó {device.name}")
-```
-
-**Solución con relaciones:**
-```python
-# Código limpio y pythónico
-user = db.query(User).filter(User.id == 1).first()
-for loan in user.loans:  # Acceso directo gracias a relationship()
-    print(f"{user.name} prestó {loan.device.name}")
-```
-
-**Beneficios de las relaciones:**
-1. **Normalización:** Evita redundancia de datos
-2. **Integridad referencial:** No puedo crear Loan sin User válido
-3. **Acceso fácil:** `user.loans`, `device.loans`
-4. **Código limpio:** Menos queries manuales
-5. **Mantenibilidad:** Cambios centralizados en relaciones
-
----
-
-### 🚀 Consultas con JOINs - Por Qué Optimizan Performance
-
-**Problema N+1 (sin JOINs):**
-```python
-loans = db.query(Loan).all()  # Query 1
-for loan in loans:
-    user = db.query(User).filter(User.id == loan.user_id).first()  # Query 2-11
-    device = db.query(Device).filter(Device.id == loan.device_id).first()  # Query 12-21
-# Total: 1 + (10*2) = 21 queries ❌ LENTÍSIMO
-```
-
-**Solución con JOINs (eager loading):**
-```python
-loans = db.query(Loan).options(
-    joinedload(Loan.user),
-    joinedload(Loan.device)
-).all()  # Query 1 (con todo)
-# Total: 1 query ✅ RÁPIDO
-```
-
-**Impacto en performance:**
-- 10 préstamos sin JOINs: 21 queries = 2100ms (estimado)
-- 10 préstamos con JOINs: 1 query = 50ms (estimado)
-- **Mejora: 42x más rápido** 🚀
-
-En producción con millones de registros, la diferencia es abismal.
-
----
-
-### 🔎 Filtros Avanzados - Por Qué Mejoran UX
-
-**Sin filtros:**
-```bash
-GET /loans/  # Trae 10,000 préstamos ❌
-# El cliente debe procesar todo localmente
-```
-
-**Con filtros:**
-```bash
-GET /loans/?status=active&device_type=laptop  # Trae 50 resultados ✅
-# El servidor filtra eficientemente
-```
-
-**Beneficios:**
-1. **Menor transferencia de datos**
-2. **Procesamiento en el servidor (más eficiente)**
-3. **UX mejorada (respuestas rápidas)**
-4. **Escalabilidad (soporta más usuarios)**
-
----
-
-### 🎯 Conclusión
-
-Device Systems API v3.0 es **profesional y escalable** porque:
-
-1. **Alembic** → Migraciones seguras y versionadas
-2. **SQLAlchemy ORM** → Relaciones bien definidas
-3. **JOINs inteligentes** → Performance óptimo
-4. **Filtros avanzados** → Flexibilidad y eficiencia
-5. **Validaciones Pydantic** → Datos seguros
-6. **Manejo de errores** → Confiabilidad
-
-Este es el estándar que usan empresas grandes. No es "pajarito", es profesional.
-
----
-
-## 📄 Licencia
-
-MIT
-
-## ✉️ Contacto
-
-**Device Systems** - Sistema profesional de gestión de dispositivos
-
----
-
-**Estado:** ✅ Completado y listo para producción
-**Versión:** 3.0.0
-**Fecha:** Junio 2026
----
-
-## 💡 Reflexión: Importancia de Migraciones, Relaciones y Consultas Avanzadas
-
-### 🔄 Migraciones (Alembic) - Por Qué Son Críticas
-
-**Problema sin migraciones:**
-- Cambios manuales en tablas = riesgo de inconsistencia
-- No hay historial de cambios
-- Imposible hacer rollback si algo sale mal
-- En producción, cambiar estructura es arriesgado
-
-**Solución con Alembic:**
-- ✅ Versionamiento del schema (como Git para BD)
-- ✅ Cada cambio está documentado
-- ✅ Rollback automático si algo falla
-- ✅ Reproducible en cualquier máquina
-- ✅ Seguro para producción
-
-**Ejemplo real:**
-```bash
-# Versión 1: Solo usuarios
-alembic upgrade 001
-
-# Versión 2: Agregamos devices
-alembic upgrade 002
-
-# Algo salió mal, rollback:
-alembic downgrade 001
-
-# De nuevo a v2 cuando está listo:
-alembic upgrade 002
-```
-
-Sin Alembic, esto requeriría scripts SQL manuales y es propenso a errores.
-
----
-
-### 🔗 Relaciones (SQLAlchemy ORM) - Por Qué Importan
-
-**Problema sin relaciones:**
-```python
-# Código tedioso y propenso a errores
-user = db.query(User).filter(User.id == 1).first()
-loans = db.query(Loan).filter(Loan.user_id == user.id).all()
-for loan in loans:
-    device = db.query(Device).filter(Device.id == loan.device_id).first()
-    print(f"{user.name} prestó {device.name}")
-```
-
-**Solución con relaciones:**
-```python
-# Código limpio y pythónico
-user = db.query(User).filter(User.id == 1).first()
-for loan in user.loans:  # Acceso directo gracias a relationship()
-    print(f"{user.name} prestó {loan.device.name}")
-```
-
-**Beneficios de las relaciones:**
-1. **Normalización:** Evita redundancia de datos
-2. **Integridad referencial:** No puedo crear Loan sin User válido
-3. **Acceso fácil:** `user.loans`, `device.loans`
-4. **Código limpio:** Menos queries manuales
-5. **Mantenibilidad:** Cambios centralizados en relaciones
-
----
-
-### 🚀 Consultas con JOINs - Por Qué Optimizan Performance
-
-**Problema N+1 (sin JOINs):**
-```python
-loans = db.query(Loan).all()  # Query 1
-for loan in loans:
-    user = db.query(User).filter(User.id == loan.user_id).first()  # Query 2-11
-    device = db.query(Device).filter(Device.id == loan.device_id).first()  # Query 12-21
-# Total: 1 + (10*2) = 21 queries ❌ LENTÍSIMO
-```
-
-**Solución con JOINs (eager loading):**
-```python
-loans = db.query(Loan).options(
-    joinedload(Loan.user),
-    joinedload(Loan.device)
-).all()  # Query 1 (con todo)
-# Total: 1 query ✅ RÁPIDO
-```
-
-**Impacto en performance:**
-- 10 préstamos sin JOINs: 21 queries = 2100ms (estimado)
-- 10 préstamos con JOINs: 1 query = 50ms (estimado)
-- **Mejora: 42x más rápido** 🚀
-
-En producción con millones de registros, la diferencia es abismal.
-
----
-
-### 🔎 Filtros Avanzados - Por Qué Mejoran UX
-
-**Sin filtros:**
-```bash
-GET /loans/  # Trae 10,000 préstamos ❌
-# El cliente debe procesar todo localmente
-```
-
-**Con filtros:**
-```bash
-GET /loans/?status=active&device_type=laptop  # Trae 50 resultados ✅
-# El servidor filtra eficientemente
-```
-
-**Beneficios:**
-1. **Menor transferencia de datos**
-2. **Procesamiento en el servidor (más eficiente)**
-3. **UX mejorada (respuestas rápidas)**
-4. **Escalabilidad (soporta más usuarios)**
-
----
-
-### 🎯 Conclusión
-
-Device Systems API v3.0 es **profesional y escalable** porque:
-
-1. **Alembic** → Migraciones seguras y versionadas
-2. **SQLAlchemy ORM** → Relaciones bien definidas
-3. **JOINs inteligentes** → Performance óptimo
-4. **Filtros avanzados** → Flexibilidad y eficiencia
-5. **Validaciones Pydantic** → Datos seguros
-6. **Manejo de errores** → Confiabilidad
-
-Este es el estándar que usan empresas grandes. No es "pajarito", es profesional.
-
----
-
-## 📄 Licencia
-
-MIT
-
-## ✉️ Contacto
-
-**Device Systems** - Sistema profesional de gestión de dispositivos
-
----
-
-**Estado:** ✅ Completado y listo para producción
-**Versión:** 3.0.0
-**Fecha:** Junio 2026
+En conjunto, este proyecto mostró que la seguridad en una API REST no es un checkbox que se marca una sola vez, sino una serie de decisiones de diseño que deben revisarse constantemente, probarse activamente (incluyendo los casos negativos: sin token, con rol incorrecto, con rate limiting excedido) y documentarse para que cualquier persona que continúe el proyecto entienda no solo qué se implementó, sino por qué.
