@@ -1,118 +1,96 @@
-# device_systems
+# Device Systems API v3.0
 
-API REST construida con **FastAPI** para la gestión de usuarios del sistema `device_systems`.
+API REST para la gestión de usuarios con persistencia en base de datos mediante SQLAlchemy y FastAPI.
 
----
+## Estructura del proyecto
 
-## Instalación de dependencias
-
-```bash
-pip install fastapi uvicorn "pydantic[email]"
+```
+device_systems/
+│── app/
+│   │── main.py                          # Punto de entrada de la aplicación
+│   │── database/
+│   │   └── connection.py                # Engine, SessionLocal y Base
+│   │── models/
+│   │   └── user_model.py                # Modelo SQLAlchemy de la tabla users
+│   │── schemas/
+│   │   └── user_schema.py               # Schemas Pydantic (entrada/salida)
+│   │── routes/
+│   │   └── user_routes.py               # Endpoints del recurso /users
+│   │── services/
+│   │   └── user_service.py              # Lógica CRUD sobre la base de datos
+│   │── dependencies/
+│   │   └── database_dependency.py       # Dependencia de sesión DB
+│── requirements.txt
+│── README.md
 ```
 
----
+## Instalación
 
-## Ejecución del servidor
+```bash
+pip install -r requirements.txt
+```
 
-Desde la carpeta raíz del proyecto (`device_systems/`):
+## Ejecutar la aplicación
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-El servidor queda disponible en: `http://127.0.0.1:8000`  
-Documentación Swagger UI: `http://127.0.0.1:8000/docs`
+## Documentación
 
----
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
-## Tabla de endpoints
+## Endpoints disponibles
 
-| Método | Endpoint              | Descripción                          | Status |
-|--------|-----------------------|--------------------------------------|--------|
-| GET    | /users                | Listar todos los usuarios            | 200    |
-| GET    | /users/{user_id}      | Obtener usuario por ID               | 200    |
-| GET    | /users?role=admin     | Filtrar usuarios por rol             | 200    |
-| GET    | /users?is_active=true | Filtrar usuarios por estado activo   | 200    |
-| POST   | /users                | Crear un nuevo usuario               | 201    |
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | /users | Listar todos los usuarios |
+| GET | /users/{id} | Obtener usuario por ID |
+| POST | /users | Crear nuevo usuario |
+| PUT | /users/{id} | Actualizar usuario completo |
+| PATCH | /users/{id} | Actualizar usuario parcialmente |
+| DELETE | /users/{id} | Eliminar usuario |
 
----
+### Filtros disponibles en GET /users
 
-## Ejemplos de peticiones
+| Parámetro | Tipo | Descripción |
+|-----------|------|-------------|
+| role | string | Filtrar por rol: `admin`, `support`, `user` |
+| is_active | boolean | Filtrar por estado: `true` / `false` |
+| order_by | string | Ordenar por: `name`, `created_at` |
 
-### GET /users
-```
-GET http://127.0.0.1:8000/users
-```
+## Códigos de respuesta
 
-### GET /users/{user_id}
-```
-GET http://127.0.0.1:8000/users/1
-```
+| Caso | Código |
+|------|--------|
+| Usuario creado | 201 Created |
+| Consulta/Actualización correcta | 200 OK |
+| Eliminación correcta | 204 No Content |
+| Usuario no encontrado | 404 Not Found |
+| Email duplicado | 400 Bad Request |
+| Error de validación | 422 Unprocessable Entity |
 
-### GET /users?role=admin
-```
-GET http://127.0.0.1:8000/users?role=admin
-```
+## Modelo de datos - User
 
-### GET /users?is_active=true
-```
-GET http://127.0.0.1:8000/users?is_active=true
-```
+| Campo | Tipo | Restricción |
+|-------|------|-------------|
+| id | Integer | Primary Key, autoincrement |
+| name | String | Obligatorio, mínimo 3 caracteres |
+| email | String | Único, obligatorio, formato válido |
+| role | String | admin / support / user |
+| is_active | Boolean | Default: True |
+| created_at | DateTime | Se asigna automáticamente |
 
-### POST /users
-```
-POST http://127.0.0.1:8000/users
-Content-Type: application/json
+## Diferencia entre Modelo SQLAlchemy y Schema Pydantic
 
-{
-  "name": "Juan Pérez",
-  "email": "juan@gmail.com",
-  "role": "user",
-  "is_active": true
-}
-```
+| Aspecto | Modelo SQLAlchemy | Schema Pydantic |
+|---------|-------------------|-----------------|
+| Propósito | Representa la tabla en la BD | Define la estructura de datos en la API |
+| Validación | Constraints de BD (unique, nullable) | Validaciones de entrada (formato, longitud) |
+| Uso | Operaciones ORM, consultas | Serialización/deserialización de requests |
+| Ubicación | `models/` | `schemas/` |
 
----
+## Reflexión sobre persistencia
 
-## Capturas de Swagger UI y pruebas
-
-### Swagger UI
-![Swagger UI](pictures/swagger_ui.png)
-
-### GET - Todos los usuarios
-![Todos los usuarios](pictures/todos%20los%20usuarios.png)
-
-### GET - Usuario por ID
-![Usuario por ID](pictures/usuario%20por%20id.png)
-
-### GET - Filtro por role
-![Filtro por role](pictures/filtro%20por%20role.png)
-
-### GET - Filtro por is_active
-![Filtro por is_active](pictures/filtro%20por%20is_active.png)
-
-### POST - Crear usuario
-![Crear usuario](pictures/crear%20usuario.png)
-
-### POST - Email duplicado (Error 400)
-![Email duplicado](pictures/email%20duplicado.png)
-
-### POST - Error de validación (Error 422)
-![Error validacion](pictures/error%20validacion.png)
-
----
-
-## Cabeceras personalizadas en respuestas
-
-Todas las respuestas incluyen:
-
-| Cabecera        | Valor           |
-|-----------------|-----------------|
-| X-App-Name      | device_systems  |
-| X-API-Version   | 1.0             |
-
----
-
-## Reflexión
-
-FastAPI permite construir APIs REST de forma rápida y ordenada. La integración con Pydantic facilita la validación automática de datos, reduciendo errores y haciendo el código más legible. Los modelos de respuesta garantizan que solo se exponga la información necesaria al cliente.
+Sin persistencia, todos los datos se pierden al reiniciar la aplicación. SQLAlchemy permite que los usuarios sobrevivan reinicios, sean consultados eficientemente y mantengan integridad referencial. Esto es fundamental en cualquier sistema real donde los datos tienen valor más allá de la sesión actual.
